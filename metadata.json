@@ -1,0 +1,5 @@
+{
+  "name": "DDR AI - Due Diligence Risk Engine",
+  "description": "AI-powered Commercial Office Due Diligence application. Analyzes unstructured documents (Financial, Physical, Legal) to quantify risk and valuation.",
+  "requestFramePermissions": []
+}
