@@ -1,20 +1,60 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# PMAI — 부동산 PM/FM 운영 인텔리전스
 
-# Run and deploy your AI Studio app
+관리비·임대차·수광열비·관리단·행정·법무·외주계약·회계·수발주(재고)·AI 비서를 하나의 건물 데이터로 묶은 운영 앱입니다.
+기록 시스템(ERP)을 대체하지 않고 그 위에서 **검증·근거·승인**을 담당합니다.
 
-This contains everything you need to run your app locally.
+## 원칙
 
-View your app in AI Studio: https://ai.studio/apps/drive/12JDpgoSeH6_GyvYGGI1aJZg8FVLtrozQ
+- **계산은 엔진이, 설명은 AI가** — 금액·판정은 `src/engine`의 순수 함수가 계산하고, LLM은 그 결과만 보고 설명합니다.
+- **모든 금액에 근거** — 관리비 안분 결과는 지출 원장·검침·계약 조건까지 추적되며, 지출 합계와 1원 단위로 일치합니다.
+- **판단은 사람** — 고지 확정·지급·발주는 승인 게이트(L2)를 거치고, 감사 로그에 규칙·모델 버전과 입력 해시가 남습니다.
 
-## Run Locally
+## 메뉴
 
-**Prerequisites:**  Node.js
+| 메뉴 | 내용 |
+| --- | --- |
+| 관리비 | 규칙 기반 안분(면적·검침·혼합, 공실·특약 상한·정액 계약), 이상치 탐지, 산출근거서·고지서, 공개 내역 |
+| 임대차 | 렌트롤, 만기·통지·인상 캘린더, 환산보증금·5% 상한 판정, 계약서 필드 추출(검토 큐) |
+| 수광열비 | 전기·가스·수도 추이, 15분 수요전력, 요금제·계약전력 시나리오, 탄소 배출 |
+| 관리단 | 구분소유자·의결권, 집회 안건 표결과 정족수 판정, 관리비 공개 |
+| 행정 | 법정점검 캘린더·증빙·지적사항, 민원 대장 |
+| 법무 | 분쟁 사례, 국가법령정보 Open API 법령·판례 검색, 쟁점별 기준 조문, 검토 메모 초안 |
+| 외주계약 | 계약 ↔ 실적 ↔ 인보이스 3-way 매칭, 지급 권고, 벤더 스코어카드 |
+| 회계 | 지출 원장, 수납·미수, 예산 대비 실적 |
+| 수발주·재고 | 재고, 재주문 제안, 발주서 승인·입고 |
+| AI 비서 | 엔진이 만든 사실을 근거로 답변(근거 화면 링크) |
+| 부가 서비스 | RUNIQ STUDIO·Academy 등 안내 링크, 실사 리스크 분석(DDR) |
 
+## 실행
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+npm install
+npm run dev        # http://localhost:3000
+npm test           # 엔진 단위 테스트
+npm run build
+```
+
+API 키와 법령 API ID는 앱의 **설정** 화면에서 입력합니다(없어도 규칙 기반으로 동작).
+
+- **Claude / Gemini API 키** — 계약서 추출, AI 비서 설명, 법무 메모 초안에 사용
+- **국가법령정보 Open API ID(OC)** — 법무 메뉴의 법령·판례 검색. 브라우저에서 직접 호출할 수 없어 `/lawapi` 경로로 중계합니다(`vite.config.ts` 프록시, 배포 시 `vercel.json` rewrites).
+
+## 현재 한계 (운영 전 해결 필요)
+
+- **프론트엔드 단독**입니다. 데이터는 브라우저(localStorage)에 저장되어 사용자 간 공유되지 않고, 로그인·서버 권한 검사가 없습니다. 역할 전환은 시연용입니다.
+- API 키가 브라우저에 저장되고 브라우저에서 모델 API로 직접 전송됩니다. 고객 운영 전 서버 프록시로 옮겨야 합니다.
+- 건물·임차인·거래처·금액은 모두 **가상의 샘플 데이터**이며, 검증 기능 시연을 위한 오류가 의도적으로 들어 있습니다.
+- 전기요금 단가, 배출계수·허용량·감축 경로, 법정점검 주기, 환산보증금 기준액, 관리단 정족수는 **예시값**입니다. 실제 적용 전 현행 고시·법령으로 교체하고 법무 검토를 거쳐야 합니다.
+- ERP·은행·한전·BMS 연동은 구현되지 않았습니다(수동 입력·샘플).
+- 실사 리스크 분석은 파일 본문을 읽지 않는 가정 기반 시뮬레이션입니다.
+
+## 구조
+
+```
+src/domain   자산 온톨로지(타입)
+src/engine   안분·이상치·임대차·3-way·요금·탄소·법정점검·관리단·재고·법령 API 파서 (+ 테스트)
+src/data     샘플 데이터, 부가 서비스 목록
+src/store    상태(zustand, localStorage), 승인·감사 로그
+src/llm      모델 어댑터(Claude·Gemini), AI 작업과 규칙 기반 폴백
+src/pages    화면
+```

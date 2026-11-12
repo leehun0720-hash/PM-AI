@@ -1,0 +1,3 @@
+{
+  "rewrites": [{ "source": "/lawapi/:path*", "destination": "https://www.law.go.kr/:path*" }]
+}

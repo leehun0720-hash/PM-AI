@@ -1,6 +1,6 @@
 import React from 'react';
 import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend } from 'recharts';
-import { RiskItem } from '../types';
+import { RiskItem } from '../domain/ddr';
 
 interface RiskMatrixProps {
   risks: RiskItem[];
@@ -11,9 +11,9 @@ const RiskMatrix: React.FC<RiskMatrixProps> = ({ risks }) => {
   // Not strictly needed for color mapping but useful for logic if needed
   const getColor = (type: string) => {
     switch (type) {
-      case 'Financial': return '#3b82f6'; // blue-500
-      case 'Physical': return '#ef4444'; // red-500
-      case 'Legal': return '#f59e0b'; // amber-500
+      case 'Financial': return '#2a78d6'; // blue-500
+      case 'Physical': return '#eb6834'; // red-500
+      case 'Legal': return '#1baf7a'; // amber-500
       default: return '#64748b';
     }
   };
@@ -76,19 +76,19 @@ const RiskMatrix: React.FC<RiskMatrixProps> = ({ risks }) => {
           <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3' }} />
           <Legend verticalAlign="top" height={36}/>
           
-          <Scatter name="재무 (Financial)" data={risks.filter(r => r.type === 'Financial')} fill="#3b82f6">
+          <Scatter name="재무 (Financial)" data={risks.filter(r => r.type === 'Financial')} fill="#2a78d6">
              {risks.filter(r => r.type === 'Financial').map((entry, index) => (
-               <Cell key={`cell-f-${index}`} fill="#3b82f6" />
+               <Cell key={`cell-f-${index}`} fill="#2a78d6" />
              ))}
           </Scatter>
-          <Scatter name="물리적 (Physical)" data={risks.filter(r => r.type === 'Physical')} fill="#ef4444">
+          <Scatter name="물리적 (Physical)" data={risks.filter(r => r.type === 'Physical')} fill="#eb6834">
              {risks.filter(r => r.type === 'Physical').map((entry, index) => (
-               <Cell key={`cell-p-${index}`} fill="#ef4444" />
+               <Cell key={`cell-p-${index}`} fill="#eb6834" />
              ))}
           </Scatter>
-          <Scatter name="법률 (Legal)" data={risks.filter(r => r.type === 'Legal')} fill="#f59e0b">
+          <Scatter name="법률 (Legal)" data={risks.filter(r => r.type === 'Legal')} fill="#1baf7a">
              {risks.filter(r => r.type === 'Legal').map((entry, index) => (
-               <Cell key={`cell-l-${index}`} fill="#f59e0b" />
+               <Cell key={`cell-l-${index}`} fill="#1baf7a" />
              ))}
           </Scatter>
         </ScatterChart>
