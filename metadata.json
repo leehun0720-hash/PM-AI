@@ -1,5 +1,4 @@
 {
-  "name": "DDR AI - Due Diligence Risk Engine",
-  "description": "AI-powered Commercial Office Due Diligence application. Analyzes unstructured documents (Financial, Physical, Legal) to quantify risk and valuation.",
-  "requestFramePermissions": []
+  "name": "PMAI",
+  "description": "부동산 PM/FM 운영 인텔리전스 — 관리비·임대차·수광열비·관리단·행정·법무·외주계약·회계·수발주·AI 비서"
 }

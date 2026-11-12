@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiskItem } from '../types';
+import { RiskItem } from '../domain/ddr';
 import { AlertTriangle, ShieldAlert, FileText } from 'lucide-react';
 
 interface RiskTableProps {
