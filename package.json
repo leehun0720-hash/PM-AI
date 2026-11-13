@@ -19,6 +19,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.18.5",
+    "read-excel-file": "9.3.12",
     "recharts": "^3.4.1",
     "zustand": "^5.1.0"
   },
