@@ -276,12 +276,19 @@ export const useStore = create<State>()(
         const amount = fresh.reduce((a, e) => a + e.amount, 0);
         const old = s.importProfiles[buildingId] ?? { columns: {}, accounts: {} };
         const batch: ImportBatch = { id: batchId, buildingId, kind: 'expense', fileName, at: new Date().toISOString(), actor: s.settings.userName, count: fresh.length, amount, months };
-        set({
-          expenses: [...s.expenses, ...fresh.map((e, i) => ({ ...e, id: `${batchId}-${String(i + 1).padStart(4, '0')}` }))],
-          importBatches: [batch, ...s.importBatches],
-          importProfiles: { ...s.importProfiles, [buildingId]: { columns: { ...old.columns, ...profile.columns }, accounts: { ...old.accounts, ...profile.accounts } } },
-        });
-        if (storedSize() > STORAGE_LIMIT) {
+        // persist는 메모리 상태를 먼저 바꾸고 저장소에 쓴다. 저장소가 가득 차면 set()이 예외를 던지므로 잡아서 되돌린다.
+        let full = false;
+        try {
+          set({
+            expenses: [...s.expenses, ...fresh.map((e, i) => ({ ...e, id: `${batchId}-${String(i + 1).padStart(4, '0')}` }))],
+            importBatches: [batch, ...s.importBatches],
+            importProfiles: { ...s.importProfiles, [buildingId]: { columns: { ...old.columns, ...profile.columns }, accounts: { ...old.accounts, ...profile.accounts } } },
+          });
+          full = storedSize() > STORAGE_LIMIT;
+        } catch {
+          full = true;
+        }
+        if (full) {
           set(prev);
           return { ok: false, reason: '브라우저 저장 공간이 부족합니다. 월별로 나눠 올려 주세요.' };
         }

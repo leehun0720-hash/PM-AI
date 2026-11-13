@@ -63,3 +63,24 @@ test('계정이 빈 줄은 이유를 남긴다', () => {
   const p = buildDrafts(t, autoMap(t.headers), opt);
   expect(p.errors).toEqual([{ row: 2, reason: '계정이 비어 있습니다', raw: ['', '1000', '갑'] }]);
 });
+
+test('차변이 글자면 대변이 있어도 못 읽은 줄로 둔다', () => {
+  const t = toTable(parseCsv('계정,차변,대변\n수선비,미정,500\n수선비,미정,0\n수선비,,300'), isKnownHeader);
+  const p = buildDrafts(t, autoMap(t.headers), opt);
+  expect(p.errors.map((e) => e.row)).toEqual([2, 3]);
+  expect(p.drafts).toHaveLength(1);
+  expect(p.drafts[0].amount).toBe(-300);
+});
+test('일자·귀속월 칸을 못 읽으면 화면 월로 넣지 않고 못 읽은 줄로 둔다', () => {
+  const t = toTable(parseCsv('일자,계정,금액\n24.01.15,수선비,1000\n,수선비,2000'), isKnownHeader);
+  const p = buildDrafts(t, autoMap(t.headers), opt);
+  expect(p.errors).toHaveLength(1);
+  expect(p.errors[0].reason).toContain('24.01.15');
+  expect(p.drafts).toEqual([expect.objectContaining({ amount: 2000, month: '2026-10' })]);
+});
+test('적요가 "합계"로 시작하는 실제 지출은 합계 줄로 보지 않는다', () => {
+  const t = toTable(parseCsv('계정,적요,금액\n수선비,합계잔액 조정 수수료,1000\n합계,,1000'), isKnownHeader);
+  const p = buildDrafts(t, autoMap(t.headers), opt);
+  expect(p.drafts).toHaveLength(1);
+  expect(p.skippedSummary).toBe(1);
+});

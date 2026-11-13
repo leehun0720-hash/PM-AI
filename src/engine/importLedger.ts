@@ -35,20 +35,28 @@ export function buildDrafts(table: Table, map: ColumnMap, opts: { buildingId: st
   table.rows.forEach((r, i) => {
     const row = table.headerRow + 2 + i;
     const cell = (f: ExpenseField) => (map[f] === null ? '' : (r[map[f]!] ?? '').trim());
-    if (r.some((c) => SUMMARY.test(normHeader(c)))) { out.skippedSummary++; return; }
+    // 합계 줄은 처음 채워진 칸만 본다(적요가 '합계…'로 시작하는 실제 지출을 빼지 않도록)
+    const first = r.find((c) => c.trim() !== '') ?? '';
+    if (SUMMARY.test(normHeader(first))) { out.skippedSummary++; return; }
+    const fail = (reason: string) => out.errors.push({ row, reason, raw: r });
     const debitRaw = cell('amount');
+    const creditRaw = cell('credit');
     const debit = parseAmount(debitRaw);
-    const credit = map.credit === null ? null : parseAmount(cell('credit'));
-    if (debit === null && credit === null) {
-      out.errors.push({ row, reason: `금액을 읽지 못했습니다: "${debitRaw}"`, raw: r });
-      return;
-    }
+    const credit = parseAmount(creditRaw);
+    // 채워져 있는데 못 읽은 칸은 0으로 치지 않는다
+    if ((debitRaw && debit === null) || (!debitRaw && !creditRaw)) { fail(`금액을 읽지 못했습니다: "${debitRaw}"`); return; }
+    if (creditRaw && credit === null) { fail(`대변 금액을 읽지 못했습니다: "${creditRaw}"`); return; }
     const amount = (debit ?? 0) - (credit ?? 0);
     const account = cell('account');
-    if (!account) { out.errors.push({ row, reason: '계정이 비어 있습니다', raw: r }); return; }
+    if (!account) { fail('계정이 비어 있습니다'); return; }
+    const dateRaw = cell('date');
+    const monthRaw = cell('month');
+    const date = parseDate(dateRaw) ?? undefined;
+    if (dateRaw && !date) { fail(`일자를 읽지 못했습니다: "${dateRaw}"`); return; }
+    const pickedMonth = monthRaw ? parseMonth(monthRaw) : null;
+    if (monthRaw && !pickedMonth) { fail(`귀속월을 읽지 못했습니다: "${monthRaw}"`); return; }
     if (amount === 0) { out.skippedZero++; return; }
-    const date = parseDate(cell('date')) ?? undefined;
-    const month = parseMonth(cell('month')) ?? date?.slice(0, 7) ?? opts.fallbackMonth;
+    const month = pickedMonth ?? date?.slice(0, 7) ?? opts.fallbackMonth;
     const vat = map.vat === null ? undefined : parseAmount(cell('vat')) ?? undefined;
     const docNo = cell('docNo') || undefined;
     const base = { month, date, account, vendor: cell('vendor'), amount, memo: cell('memo'), vat, docNo };
