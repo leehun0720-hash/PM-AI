@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { buildSeed, ownerMap, type SeedData } from '../data/seed';
 import type {
-  Approval, AuditEvent, CivilRequest, Expense, Inspection, ISODate, Lease, LegalCase, Month, PurchaseOrder, Role, Settlement, Vote,
+  Approval, AuditEvent, CivilRequest, Expense, ImportBatch, ImportProfile, Inspection, ISODate, Lease, LegalCase, Month, PurchaseOrder, Role, Settlement, Vote,
 } from '../domain/types';
 import { ROLE_LABEL } from '../domain/types';
 import { allocate, RULE_VERSION } from '../engine/allocation';
@@ -62,7 +62,26 @@ export interface State extends SeedData {
   moveStock: (itemId: string, type: 'in' | 'out', qty: number, memo: string) => void;
   createPurchaseOrder: (buildingId: string, vendor: string, lines: PurchaseOrder['lines']) => void;
   receivePurchaseOrder: (id: string) => void;
+
+  importBatches: ImportBatch[];
+  importProfiles: Record<string, ImportProfile>;
+  lockedMonths: (buildingId: string, months: Month[]) => Month[];
+  applyImport: (a: { buildingId: string; fileName: string; batchId: string; fresh: Omit<Expense, 'id'>[]; profile: ImportProfile }) => ImportResult<{ batchId: string }>;
+  undoImport: (batchId: string) => ImportResult<{ removed: number }>;
 }
+
+export type ImportResult<T> = ({ ok: true } & T) | { ok: false; reason: string };
+
+/** 브라우저 저장 한도(보통 5MB)보다 조금 낮게 잡은 기준 */
+const STORAGE_LIMIT = 4.5 * 1024 * 1024;
+const storedSize = () => {
+  try {
+    return typeof localStorage === 'undefined' ? 0 : (localStorage.getItem('pmai-state-v1') ?? '').length * 2;
+  } catch {
+    return 0;
+  }
+};
+const lockReason = (months: Month[], verb: string) => `승인된 정산이 있는 월(${months.join(', ')})은 ${verb} 수 없습니다.`;
 
 const uid = (p: string) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 export const canApprove = (role: Role) => role === 'pm' || role === 'amc';
@@ -78,10 +97,12 @@ export const useStore = create<State>()(
       approvals: [],
       audit: [],
       settings: defaultSettings,
+      importBatches: [],
+      importProfiles: {},
 
       setBuilding: (id) => set({ buildingId: id }),
       updateSettings: (p) => set((s) => ({ settings: { ...s.settings, ...p } })),
-      resetData: () => set((s) => ({ ...buildSeed(today()), settlements: [], approvals: [], audit: [], buildingId: 'A', settings: s.settings })),
+      resetData: () => set((s) => ({ ...buildSeed(today()), settlements: [], approvals: [], audit: [], importBatches: [], importProfiles: {}, buildingId: 'A', settings: s.settings })),
 
       log: (action, target, detail, extra) =>
         set((s) => ({ audit: [{ id: uid('AU'), at: new Date().toISOString(), actor: s.settings.userName, role: s.settings.role, action, target, detail, ...extra }, ...s.audit].slice(0, 500) })),
@@ -240,6 +261,55 @@ export const useStore = create<State>()(
         if (!po || po.status !== 'approved') return;
         for (const l of po.lines) get().moveStock(l.itemId, 'in', l.qty, `발주 ${id} 입고`);
         set((s) => ({ purchaseOrders: s.purchaseOrders.map((p) => (p.id === id ? { ...p, status: 'received' } : p)) }));
+      },
+
+      lockedMonths: (buildingId, months) =>
+        months.filter((m) => get().settlements.some((x) => x.buildingId === buildingId && x.month === m && x.status === 'approved')),
+
+      applyImport: ({ buildingId, fileName, batchId, fresh, profile }) => {
+        const s = get();
+        if (fresh.length === 0) return { ok: false, reason: '반영할 줄이 없습니다.' };
+        const months = [...new Set(fresh.map((e) => e.month))].sort();
+        const locked = s.lockedMonths(buildingId, months);
+        if (locked.length) return { ok: false, reason: lockReason(locked, '가져올') };
+        const prev = { expenses: s.expenses, importBatches: s.importBatches, importProfiles: s.importProfiles };
+        const amount = fresh.reduce((a, e) => a + e.amount, 0);
+        const old = s.importProfiles[buildingId] ?? { columns: {}, accounts: {} };
+        const batch: ImportBatch = { id: batchId, buildingId, kind: 'expense', fileName, at: new Date().toISOString(), actor: s.settings.userName, count: fresh.length, amount, months };
+        // persist는 메모리 상태를 먼저 바꾸고 저장소에 쓴다. 저장소가 가득 차면 set()이 예외를 던지므로 잡아서 되돌린다.
+        let full = false;
+        try {
+          set({
+            expenses: [...s.expenses, ...fresh.map((e, i) => ({ ...e, id: `${batchId}-${String(i + 1).padStart(4, '0')}` }))],
+            importBatches: [batch, ...s.importBatches],
+            importProfiles: { ...s.importProfiles, [buildingId]: { columns: { ...old.columns, ...profile.columns }, accounts: { ...old.accounts, ...profile.accounts } } },
+          });
+          full = storedSize() > STORAGE_LIMIT;
+        } catch {
+          full = true;
+        }
+        if (full) {
+          set(prev);
+          return { ok: false, reason: '브라우저 저장 공간이 부족합니다. 월별로 나눠 올려 주세요.' };
+        }
+        get().log('지출 가져오기', batchId, `${fileName} — ${fresh.length}건 ${amount.toLocaleString()}원`);
+        return { ok: true, batchId };
+      },
+
+      undoImport: (batchId) => {
+        const s = get();
+        const b = s.importBatches.find((x) => x.id === batchId);
+        if (!b) return { ok: false, reason: '가져온 기록을 찾지 못했습니다.' };
+        if (b.undoneAt) return { ok: false, reason: '이미 되돌린 기록입니다.' };
+        const locked = s.lockedMonths(b.buildingId, b.months);
+        if (locked.length) return { ok: false, reason: lockReason(locked, '되돌릴') };
+        const removed = s.expenses.filter((e) => e.batchId === batchId).length;
+        set({
+          expenses: s.expenses.filter((e) => e.batchId !== batchId),
+          importBatches: s.importBatches.map((x) => (x.id === batchId ? { ...x, undoneAt: new Date().toISOString() } : x)),
+        });
+        get().log('가져오기 되돌리기', batchId, `${b.fileName} — ${removed}건 삭제`);
+        return { ok: true, removed };
       },
     }),
     { name: 'pmai-state-v1', version: 1 },

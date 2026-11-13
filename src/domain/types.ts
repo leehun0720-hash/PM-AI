@@ -96,6 +96,12 @@ export interface Expense {
   amount: number;
   memo: string;
   invoiceId?: string;
+  // 파일로 가져온 줄에만 있음
+  batchId?: string;
+  fingerprint?: string;
+  date?: ISODate;
+  vat?: number;
+  docNo?: string;
 }
 
 export type MeterType = 'electric' | 'water';
@@ -382,3 +388,8 @@ export interface PurchaseOrder {
   total: number;
   status: ApprovalStatus | 'received';
 }
+
+// ── 파일 가져오기 ─────────────────────────────────────────
+export interface ImportBatch { id: string; buildingId: string; kind: 'expense'; fileName: string; at: string; actor: string; count: number; amount: number; months: Month[]; undoneAt?: string }
+/** columns: 열 이름 줄 서명 → { 항목: 열 이름 }. accounts: 파일의 계정 → 관리비 항목 id */
+export interface ImportProfile { columns: Record<string, Partial<Record<string, string>>>; accounts: Record<string, string> }
