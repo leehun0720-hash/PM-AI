@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { buildSeed, ownerMap, type SeedData } from '../data/seed';
 import type {
-  Approval, AuditEvent, CivilRequest, Expense, ImportBatch, ImportProfile, Inspection, ISODate, Lease, LegalCase, Month, PurchaseOrder, Role, Settlement, Vote,
+  Approval, AuditEvent, CivilRequest, Expense, ImportBatch, ImportProfile, Receivable, Inspection, ISODate, Lease, LegalCase, Month, PurchaseOrder, Role, Settlement, Vote,
 } from '../domain/types';
 import { ROLE_LABEL } from '../domain/types';
 import { allocate, RULE_VERSION } from '../engine/allocation';
@@ -68,6 +68,7 @@ export interface State extends SeedData {
   lockedMonths: (buildingId: string, months: Month[]) => Month[];
   applyImport: (a: { buildingId: string; fileName: string; batchId: string; fresh: Omit<Expense, 'id'>[]; profile: ImportProfile }) => ImportResult<{ batchId: string }>;
   undoImport: (batchId: string) => ImportResult<{ removed: number }>;
+  applyRecvImport: (a: { buildingId: string; fileName: string; batchId: string; upserts: Receivable[]; profile: ImportProfile }) => ImportResult<{ batchId: string }>;
 }
 
 export type ImportResult<T> = ({ ok: true } & T) | { ok: false; reason: string };
@@ -301,6 +302,18 @@ export const useStore = create<State>()(
         const b = s.importBatches.find((x) => x.id === batchId);
         if (!b) return { ok: false, reason: '가져온 기록을 찾지 못했습니다.' };
         if (b.undoneAt) return { ok: false, reason: '이미 되돌린 기록입니다.' };
+        if (b.kind === 'receivable') {
+          const after = b.after ?? [];
+          const cur = new Map(s.receivables.map((r) => [r.id, r]));
+          if (after.some((a) => JSON.stringify(cur.get(a.id)) !== JSON.stringify(a))) return { ok: false, reason: '가져온 뒤 다시 바뀐 수납 기록이 있어 되돌릴 수 없습니다.' };
+          const restore = new Map(after.map((a, i) => [a.id, b.before?.[i] ?? null]));
+          set({
+            receivables: s.receivables.flatMap((r) => (restore.has(r.id) ? (restore.get(r.id) ? [restore.get(r.id)!] : []) : [r])),
+            importBatches: s.importBatches.map((x) => (x.id === batchId ? { ...x, undoneAt: new Date().toISOString() } : x)),
+          });
+          get().log('가져오기 되돌리기', batchId, `${b.fileName} — 수납 ${after.length}건 복원`);
+          return { ok: true, removed: after.length };
+        }
         const locked = s.lockedMonths(b.buildingId, b.months);
         if (locked.length) return { ok: false, reason: lockReason(locked, '되돌릴') };
         const removed = s.expenses.filter((e) => e.batchId === batchId).length;
@@ -310,6 +323,38 @@ export const useStore = create<State>()(
         });
         get().log('가져오기 되돌리기', batchId, `${b.fileName} — ${removed}건 삭제`);
         return { ok: true, removed };
+      },
+
+      applyRecvImport: ({ buildingId, fileName, batchId, upserts, profile }) => {
+        const s = get();
+        if (upserts.length === 0) return { ok: false, reason: '반영할 줄이 없습니다.' };
+        const byId = new Map(s.receivables.map((r) => [r.id, r]));
+        const before = upserts.map((u) => byId.get(u.id) ?? null);
+        const ids = new Set(upserts.map((u) => u.id));
+        const old = s.importProfiles[buildingId] ?? { columns: {}, accounts: {} };
+        const paid = upserts.reduce((a, r) => a + r.paid, 0);
+        const batch: ImportBatch = {
+          id: batchId, buildingId, kind: 'receivable', fileName, at: new Date().toISOString(), actor: s.settings.userName,
+          count: upserts.length, amount: paid, months: [...new Set(upserts.map((r) => r.month))].sort(), before, after: upserts,
+        };
+        const prev = { receivables: s.receivables, importBatches: s.importBatches, importProfiles: s.importProfiles };
+        let full = false;
+        try {
+          set({
+            receivables: [...s.receivables.filter((r) => !ids.has(r.id)), ...upserts],
+            importBatches: [batch, ...s.importBatches],
+            importProfiles: { ...s.importProfiles, [buildingId]: { ...old, columns: { ...old.columns, ...profile.columns }, units: { ...old.units, ...profile.units } } },
+          });
+          full = storedSize() > STORAGE_LIMIT;
+        } catch {
+          full = true;
+        }
+        if (full) {
+          set(prev);
+          return { ok: false, reason: '브라우저 저장 공간이 부족합니다. 월별로 나눠 올려 주세요.' };
+        }
+        get().log('수납 가져오기', batchId, `${fileName} — ${upserts.length}건, 수납 ${paid.toLocaleString()}원`);
+        return { ok: true, batchId };
       },
     }),
     { name: 'pmai-state-v1', version: 1 },

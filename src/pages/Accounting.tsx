@@ -3,6 +3,7 @@ import { Badge, Btn, Card, Empty, Field, inputCls, Note, Page, Stat, Table, Tabs
 import { daysBetween, monthRange, pct, won } from '../engine/money';
 import { today, useBuilding, useStore } from '../store/store';
 import ImportDialog from './accounting/ImportDialog';
+import RecvImportDialog from './accounting/RecvImportDialog';
 
 type Tab = 'ledger' | 'receivables' | 'budget';
 
@@ -13,8 +14,9 @@ export default function Accounting() {
   const [tab, setTab] = useState<Tab>('ledger');
   const [month, setMonth] = useState(s.seedMonth);
   const [importOpen, setImportOpen] = useState(false);
+  const [recvOpen, setRecvOpen] = useState(false);
   const [undoMsg, setUndoMsg] = useState<Record<string, string>>({});
-  const batches = s.importBatches.filter((x) => x.buildingId === b.id);
+  const batches = s.importBatches.filter((x) => x.buildingId === b.id && x.kind === (tab === 'receivables' ? 'receivable' : 'expense'));
   const [form, setForm] = useState({ itemId: s.items[0].id, account: s.items[0].accounts[0], vendor: '', amount: '', memo: '' });
   const ledger = s.expenses.filter((e) => e.buildingId === b.id && e.month === month);
   const accounts = [...new Set(s.items.flatMap((i) => i.accounts))];
@@ -40,10 +42,11 @@ export default function Accounting() {
 
       <Tabs<Tab> value={tab} onChange={setTab} tabs={[{ id: 'ledger', label: '지출 원장' }, { id: 'receivables', label: `수납·미수 (${unpaid.length})` }, { id: 'budget', label: '예산 대비 실적' }]} />
 
-      {tab === 'ledger' && (
-        <div className="flex justify-end"><Btn onClick={() => setImportOpen(true)}>파일로 가져오기</Btn></div>
+      {(tab === 'ledger' || tab === 'receivables') && (
+        <div className="flex justify-end"><Btn onClick={() => (tab === 'ledger' ? setImportOpen(true) : setRecvOpen(true))}>{tab === 'ledger' ? '지출 파일로 가져오기' : '수납 파일로 가져오기'}</Btn></div>
       )}
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} buildingId={b.id} month={month} />
+      <RecvImportDialog open={recvOpen} onClose={() => setRecvOpen(false)} buildingId={b.id} month={month} />
 
       {tab === 'ledger' && (
         <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
@@ -68,9 +71,9 @@ export default function Accounting() {
           </Card>
         </div>
       )}
-      {tab === 'ledger' && batches.length > 0 && (
+      {(tab === 'ledger' || tab === 'receivables') && batches.length > 0 && (
         <Card title="가져온 기록">
-          <Table head={<tr><th className={th}>파일</th><th className={th}>가져온 시각</th><th className={`${th} text-right`}>건수</th><th className={`${th} text-right`}>금액</th><th className={th}>대상 월</th><th className={th}>상태</th></tr>}>
+          <Table head={<tr><th className={th}>파일</th><th className={th}>가져온 시각</th><th className={`${th} text-right`}>건수</th><th className={`${th} text-right`}>{tab === 'receivables' ? '수납액' : '금액'}</th><th className={th}>대상 월</th><th className={th}>상태</th></tr>}>
             {batches.map((x) => (
               <tr key={x.id}>
                 <td className={td}>{x.fileName}<p className="text-xs text-slate-500">{x.actor}</p></td>

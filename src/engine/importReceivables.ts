@@ -1,5 +1,5 @@
 // 가져오기 2단계: 관리비 고지·수납 현황 표 → 수납 기록. 같은 호실·월이 있으면 고쳐 쓰고, 없으면 새로 만든다.
-import type { ISODate, Month, Receivable, Unit } from '../domain/types';
+import type { ISODate, Month, Receivable, Settlement, Unit } from '../domain/types';
 import type { RowError } from './importLedger';
 import { normHeader, parseAmount, parseDate, parseMonth } from './importMap';
 import type { Table } from './importTable';
@@ -109,7 +109,7 @@ export interface RecvPreview {
 const same = (a: Receivable, b: Receivable) =>
   a.billed === b.billed && a.paid === b.paid && a.dueDate === b.dueDate && (a.paidDate ?? '') === (b.paidDate ?? '') && a.tenant === b.tenant;
 
-/** settlementBilled: 'unitId|month' → PMAI 정산의 임차인 부담 합계(부가세 포함). 고지액 대조에 쓴다. */
+/** settlementBilled: 'unitId|month' → PMAI 정산의 임차인 부담 합계(부가세 포함). 고지액 대조에 쓰고, 정산이 없으면 이미 있던 수납 기록의 고지액과 견준다. */
 export function buildRecvPreview(parsed: RecvParsed, opts: { buildingId: string; units: Unit[]; savedUnits: Record<string, string>; existing: Receivable[]; settlementBilled: Map<string, number> }): RecvPreview {
   const pv: RecvPreview = { upserts: [], created: 0, updated: 0, unchanged: 0, unmapped: [], errors: parsed.errors, skippedSummary: parsed.skippedSummary, overpaid: 0, billedMismatch: [], months: [], totalBilled: 0, totalPaid: 0 };
   const units = opts.units.filter((u) => u.buildingId === opts.buildingId);
@@ -130,7 +130,7 @@ export function buildRecvPreview(parsed: RecvParsed, opts: { buildingId: string;
       billed: d.billed, paid: d.paid, dueDate: d.dueDate, ...(d.paidDate ? { paidDate: d.paidDate } : {}),
     };
     if (d.paid > d.billed) pv.overpaid++;
-    const pmai = opts.settlementBilled.get(`${unitId}|${d.month}`);
+    const pmai = opts.settlementBilled.get(`${unitId}|${d.month}`) ?? old?.billed; // 정산 값, 없으면 이미 있던 고지액
     if (pmai !== undefined && pmai !== d.billed) pv.billedMismatch.push({ unitId, unit: d.unit, month: d.month, file: d.billed, pmai });
     if (old && same(old, rec)) { pv.unchanged++; continue; }
     if (old) pv.updated++; else pv.created++;
@@ -141,4 +141,20 @@ export function buildRecvPreview(parsed: RecvParsed, opts: { buildingId: string;
   pv.unmapped = [...unmapped.values()];
   pv.months = [...new Set(pv.upserts.map((r) => r.month))].sort();
   return pv;
+}
+
+/** 'unitId|month' → 정산의 임차인 부담 합계(부가세 포함). 같은 월에 정산이 여럿이면 승인된 것, 없으면 가장 최근 것. */
+export function settlementBilledMap(settlements: Settlement[], buildingId: string): Map<string, number> {
+  const pick = new Map<Month, Settlement>();
+  for (const st of settlements.filter((x) => x.buildingId === buildingId)) {
+    const cur = pick.get(st.month);
+    const better = !cur || (st.status === 'approved' && cur.status !== 'approved') || (st.status === cur.status && st.createdAt > cur.createdAt);
+    if (better) pick.set(st.month, st);
+  }
+  const out = new Map<string, number>();
+  for (const st of pick.values()) for (const l of st.lines) if (l.payer === 'tenant') {
+    const k = `${l.unitId}|${st.month}`;
+    out.set(k, (out.get(k) ?? 0) + l.amount + l.vat);
+  }
+  return out;
 }

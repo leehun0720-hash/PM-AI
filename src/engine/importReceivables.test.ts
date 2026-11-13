@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from 'vitest';
 import type { Receivable, Unit } from '../domain/types';
-import { autoMapRecv, buildRecvDrafts, buildRecvPreview, isKnownRecvHeader, matchUnit, missingRecvRequired } from './importReceivables';
+import { autoMapRecv, buildRecvDrafts, buildRecvPreview, isKnownRecvHeader, matchUnit, missingRecvRequired, settlementBilledMap } from './importReceivables';
 import { parseCsv, toTable } from './importTable';
 
 const units: Unit[] = ['101호', '201호', '301호', '601호', '1601호'].map((name, i) => ({ id: `A-0${i + 1}`, buildingId: 'A', floor: '', name, exclusiveArea: 1, contractArea: 1 }));
@@ -64,4 +64,22 @@ test('초과 수납은 따로 센다', () => {
   const t = toTable(parseCsv('호실,고지액,수납액\n101호,100,150'), isKnownRecvHeader);
   const pv = buildRecvPreview(buildRecvDrafts(t, autoMapRecv(t.headers), opt), base);
   expect(pv.overpaid).toBe(1);
+});
+
+test('정산에서 호실별 임차인 고지액(부가세 포함)을 모은다. 승인된 정산이 있으면 그것을 쓴다', () => {
+  const line = (unitId: string, payer: 'tenant' | 'owner', amount: number, vat: number) => ({ unitId, itemId: 'X', payer, payerName: '', amount, vat, reason: '', trace: [], sourceExpenseIds: [] });
+  const st = (id: string, status: 'draft' | 'approved', lines: ReturnType<typeof line>[]) => ({ id, buildingId: 'A', month: '2026-10', status, ruleVersion: '', inputHash: '', createdAt: '', poolTotal: 0, lines, anomalies: [] });
+  const m = settlementBilledMap([
+    st('S1', 'approved', [line('A-01', 'tenant', 1000, 100), line('A-01', 'tenant', 500, 50), line('A-02', 'owner', 900, 0)]),
+    st('S2', 'draft', [line('A-01', 'tenant', 9999, 0)]),
+    { ...st('S3', 'approved', [line('A-01', 'tenant', 7, 0)]), buildingId: 'B' },
+  ], 'A');
+  expect([...m]).toEqual([['A-01|2026-10', 1650]]);
+});
+
+test('정산이 없어도 이미 있는 수납 기록과 고지액이 다르면 알린다', () => {
+  const t = toTable(parseCsv('호실,부과월,고지액,수납액\n101호,2026-09,1000000,1000000'), isKnownRecvHeader);
+  const pv = buildRecvPreview(buildRecvDrafts(t, autoMapRecv(t.headers), opt), base);
+  expect(pv.billedMismatch).toEqual([{ unitId: 'A-01', unit: '101호', month: '2026-09', file: 1000000, pmai: 1240000 }]);
+  expect(pv.updated).toBe(1);
 });
