@@ -390,6 +390,12 @@ export interface PurchaseOrder {
 }
 
 // ── 파일 가져오기 ─────────────────────────────────────────
-export interface ImportBatch { id: string; buildingId: string; kind: 'expense'; fileName: string; at: string; actor: string; count: number; amount: number; months: Month[]; undoneAt?: string }
+export interface ImportBatch {
+  id: string; buildingId: string; kind: 'expense' | 'receivable'; fileName: string; at: string; actor: string;
+  count: number; amount: number; months: Month[]; undoneAt?: string;
+  /** 수납 가져오기만: 반영 전 값(없던 기록은 null)과 반영한 값. 되돌리기에 쓴다. */
+  before?: (Receivable | null)[];
+  after?: Receivable[];
+}
 /** columns: 열 이름 줄 서명 → { 항목: 열 이름 }. accounts: 파일의 계정 → 관리비 항목 id */
-export interface ImportProfile { columns: Record<string, Partial<Record<string, string>>>; accounts: Record<string, string> }
+export interface ImportProfile { columns: Record<string, Partial<Record<string, string>>>; accounts: Record<string, string>; units?: Record<string, string> }
