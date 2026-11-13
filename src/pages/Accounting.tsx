@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Badge, Btn, Card, Empty, Field, inputCls, Note, Page, Stat, Table, Tabs, td, tdNum, th } from '../components/ui';
 import { daysBetween, monthRange, pct, won } from '../engine/money';
 import { today, useBuilding, useStore } from '../store/store';
+import ImportDialog from './accounting/ImportDialog';
 
 type Tab = 'ledger' | 'receivables' | 'budget';
 
@@ -11,6 +12,9 @@ export default function Accounting() {
   const now = today();
   const [tab, setTab] = useState<Tab>('ledger');
   const [month, setMonth] = useState(s.seedMonth);
+  const [importOpen, setImportOpen] = useState(false);
+  const [undoMsg, setUndoMsg] = useState<Record<string, string>>({});
+  const batches = s.importBatches.filter((x) => x.buildingId === b.id);
   const [form, setForm] = useState({ itemId: s.items[0].id, account: s.items[0].accounts[0], vendor: '', amount: '', memo: '' });
   const ledger = s.expenses.filter((e) => e.buildingId === b.id && e.month === month);
   const accounts = [...new Set(s.items.flatMap((i) => i.accounts))];
@@ -25,7 +29,7 @@ export default function Accounting() {
   const byAccount = accounts.map((a) => ({ a, sum: ledger.filter((e) => e.account === a).reduce((x, e) => x + e.amount, 0) })).filter((x) => x.sum);
 
   return (
-    <Page title="회계" desc="지출 원장, 관리비 수납·미수, 예산 대비 실적을 관리합니다. 전표·원장 시스템(ERP)을 대체하지 않고 그 데이터를 받아 검증합니다."
+    <Page title="회계" desc="지출 원장, 관리비 수납·미수, 예산 대비 실적을 관리합니다. 쓰던 엑셀이나 ERP에서 내보낸 파일을 그대로 올려 받을 수 있습니다."
       actions={<select aria-label="월" className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)}>{monthRange(s.seedMonth, 12).reverse().map((m) => <option key={m}>{m}</option>)}</select>}>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label={`${month} 지출`} value={won(ledger.reduce((a, e) => a + e.amount, 0))} sub={`원장 ${ledger.length}건`} />
@@ -35,6 +39,11 @@ export default function Accounting() {
       </div>
 
       <Tabs<Tab> value={tab} onChange={setTab} tabs={[{ id: 'ledger', label: '지출 원장' }, { id: 'receivables', label: `수납·미수 (${unpaid.length})` }, { id: 'budget', label: '예산 대비 실적' }]} />
+
+      {tab === 'ledger' && (
+        <div className="flex justify-end"><Btn onClick={() => setImportOpen(true)}>파일로 가져오기</Btn></div>
+      )}
+      <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} buildingId={b.id} month={month} />
 
       {tab === 'ledger' && (
         <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
@@ -58,6 +67,25 @@ export default function Accounting() {
             </div>
           </Card>
         </div>
+      )}
+      {tab === 'ledger' && batches.length > 0 && (
+        <Card title="가져온 기록">
+          <Table head={<tr><th className={th}>파일</th><th className={th}>가져온 시각</th><th className={`${th} text-right`}>건수</th><th className={`${th} text-right`}>금액</th><th className={th}>대상 월</th><th className={th}>상태</th></tr>}>
+            {batches.map((x) => (
+              <tr key={x.id}>
+                <td className={td}>{x.fileName}<p className="text-xs text-slate-500">{x.actor}</p></td>
+                <td className={`${td} num text-xs`}>{x.at.slice(0, 16).replace('T', ' ')}</td>
+                <td className={tdNum}>{x.count}건</td>
+                <td className={tdNum}>{won(x.amount)}</td>
+                <td className={td}>{x.months.join(', ')}</td>
+                <td className={td}>
+                  {x.undoneAt ? <Badge tone="gray">되돌림</Badge> : <Btn onClick={() => { const r = s.undoImport(x.id); setUndoMsg({ ...undoMsg, [x.id]: r.ok ? '' : r.reason }); }}>되돌리기</Btn>}
+                  {undoMsg[x.id] && <p className="mt-1 text-xs text-red-600">{undoMsg[x.id]}</p>}
+                </td>
+              </tr>
+            ))}
+          </Table>
+        </Card>
       )}
 
       {tab === 'receivables' && (
