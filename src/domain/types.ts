@@ -96,6 +96,12 @@ export interface Expense {
   amount: number;
   memo: string;
   invoiceId?: string;
+  // 파일로 가져온 줄에만 있음
+  batchId?: string;
+  fingerprint?: string;
+  date?: ISODate;
+  vat?: number;
+  docNo?: string;
 }
 
 export type MeterType = 'electric' | 'water';
