@@ -168,3 +168,71 @@ describe('법정점검·관리단·재고·법령 API', () => {
     expect(parseLawResponse('law', {})).toEqual([]);
   });
 });
+
+describe('AM 지표(portfolio)', async () => {
+  const { buildingKpi, effectiveRent, expiryProfile, portfolioTotal, tenantRows } = await import('./portfolio');
+  const kpi = (b: string) =>
+    buildingKpi({ building: seed.buildings.find((x) => x.id === b)!, units: seed.units, leases: seed.leases, items: seed.items, lines: run(b).lines, receivables: seed.receivables, budgets: seed.budgets, expenses: seed.expenses, month: seed.seedMonth, today: TODAY });
+
+  it('임대율은 계약면적 기준이고 공실 호실을 돌려준다', () => {
+    const k = kpi('A');
+    expect(k.vacantUnits.map((u) => u.id)).toEqual(['A-08']);                 // 샘플: A-08 공실
+    expect(k.occupancy).toBeCloseTo(1 - 8940 / k.rentableArea, 6);
+  });
+
+  it('NOI = 실수령 임대료 − 소유자 부담 운영비(충당금 제외)', () => {
+    const k = kpi('A');
+    const owner = run('A').lines.filter((l) => l.payer === 'owner');
+    expect(k.ownerOpex + k.ownerReserve).toBe(owner.reduce((a, l) => a + l.amount, 0));
+    expect(k.ownerReserve).toBeGreaterThan(0);                                 // 장기수선충당금은 소유자 부담
+    expect(k.noi).toBe(k.effectiveRent - k.ownerOpex);
+  });
+
+  it('렌트프리 기간에는 실수령 임대료가 0이다', () => {
+    const l = { ...seed.leases[0], start: '2026-10-01', end: '2028-09-30', rentFreeMonths: 3, status: 'active' as const };
+    expect(effectiveRent(l, '2026-11-12')).toBe(0);
+    expect(effectiveRent(l, '2027-01-01')).toBe(l.monthlyRent);
+  });
+
+  it('포트폴리오 합계는 건물 합과 같고 임대율은 면적 가중', () => {
+    const t = portfolioTotal([kpi('A'), kpi('B')]);
+    expect(t.noi).toBe(kpi('A').noi + kpi('B').noi);
+    expect(t.occupancy).toBeCloseTo((kpi('A').leasedArea + kpi('B').leasedArea) / (kpi('A').rentableArea + kpi('B').rentableArea), 9);
+  });
+
+  it('만기 분포의 임대료 비중 합은 1, 만기 임박 임차인은 표시된다', () => {
+    const lsA = seed.leases.filter((l) => l.buildingId === 'A');
+    const prof = expiryProfile(lsA, seed.units, TODAY);
+    expect(prof.reduce((a, b) => a + b.share, 0)).toBeCloseTo(1, 9);
+    const rows = tenantRows(lsA, seed.units, TODAY);
+    expect(rows.find((r) => r.lease.id === 'LS-A05')!.flags).toContain('만기 12개월 이내');   // 샘플: 2개월 뒤 만기
+    expect(rows.find((r) => r.lease.id === 'LS-A07')!.flags).toContain('인상률 협의 조항');
+  });
+});
+
+describe('FM 설비 대장·작업지시(assets)', async () => {
+  const { equipmentRegister, guessEquipment, workOrders } = await import('./assets');
+  const A = seed.buildings.find((b) => b.id === 'A')!;
+
+  it('설비마다 관련 법정점검이 묶이고, 모든 적용 점검이 한 번씩만 나온다', () => {
+    const reg = equipmentRegister(A, seed.inspections, TODAY);
+    expect(reg.find((r) => r.equipment === 'elevator')!.rules.map((x) => x.rule.id).sort()).toEqual(['elev-reg', 'elev-self']);
+    const ids = reg.flatMap((r) => r.rules.map((x) => x.rule.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.sort()).toEqual(applicableRules(A).map((r) => r.id).sort());
+  });
+
+  it('미조치 지적과 처리 전 시설 민원이 작업지시가 된다', () => {
+    const wo = workOrders(A, seed.inspections, seed.requests, TODAY);
+    expect(wo.some((w) => w.source === 'finding' && w.title.includes('스프링클러 헤드') && w.equipment === 'sprinkler')).toBe(true);
+    expect(wo.some((w) => w.source === 'finding' && w.title.includes('유도등'))).toBe(false);   // 조치 완료 지적은 제외
+    const rq = wo.find((w) => w.ref.requestId === 'RQ-1')!;
+    expect(rq.equipment).toBe('hvac');
+    expect(rq.equipmentGuessed).toBe(true);
+  });
+
+  it('민원 글 키워드로 설비를 추정한다', () => {
+    expect(guessEquipment('엘리베이터가 멈췄어요')).toBe('elevator');
+    expect(guessEquipment('주차 문의')).toBeUndefined();
+  });
+});

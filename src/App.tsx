@@ -2,12 +2,16 @@ import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import AppShell from './components/AppShell';
 import Accounting from './pages/Accounting';
 import Admin from './pages/Admin';
+import InvestorReport from './pages/am/InvestorReport';
+import Leasing from './pages/am/Leasing';
+import Portfolio from './pages/am/Portfolio';
 import Approvals from './pages/Approvals';
 import Ask from './pages/Ask';
 import Association from './pages/Association';
 import AuditLog from './pages/AuditLog';
 import Charges from './pages/Charges';
 import Dashboard from './pages/Dashboard';
+import Assets from './pages/fm/Assets';
 import DueDiligence from './pages/DueDiligence';
 import Inventory from './pages/Inventory';
 import Leases from './pages/Leases';
@@ -23,6 +27,10 @@ export default function App() {
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<Dashboard />} />
+          <Route path="am/portfolio" element={<Portfolio />} />
+          <Route path="am/leasing" element={<Leasing />} />
+          <Route path="am/report" element={<InvestorReport />} />
+          <Route path="fm/assets" element={<Assets />} />
           <Route path="charges" element={<Charges />} />
           <Route path="leases" element={<Leases />} />
           <Route path="utilities" element={<Utilities />} />
