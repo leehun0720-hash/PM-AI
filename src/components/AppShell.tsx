@@ -1,44 +1,9 @@
-import {
-  BookOpenCheck, Bot, Building2, Calculator, ClipboardCheck, FileSignature, Gavel, History, LayoutDashboard, type LucideIcon, Menu, Package,
-  Receipt, Settings as SettingsIcon, Sparkles, Stamp, Users, Zap,
-} from 'lucide-react';
+import { Building2, Menu } from 'lucide-react';
 import { useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { ROLE_LABEL, type Role } from '../domain/types';
 import { useStore } from '../store/store';
-
-interface NavItem { to: string; label: string; icon: LucideIcon; roles?: Role[] }
-const STAFF: Role[] = ['amc', 'pm', 'fm'];
-
-export const NAV: { group: string; items: NavItem[] }[] = [
-  { group: '', items: [{ to: '/', label: '대시보드', icon: LayoutDashboard }] },
-  {
-    group: '핵심 업무', items: [
-      { to: '/charges', label: '관리비', icon: Receipt },
-      { to: '/leases', label: '임대차', icon: FileSignature, roles: ['amc', 'pm'] },
-      { to: '/utilities', label: '수광열비', icon: Zap, roles: STAFF },
-      { to: '/association', label: '관리단', icon: Users, roles: ['amc', 'pm', 'owner'] },
-      { to: '/admin', label: '행정', icon: ClipboardCheck, roles: [...STAFF, 'tenant'] },
-      { to: '/legal', label: '법무', icon: Gavel, roles: ['amc', 'pm'] },
-      { to: '/vendors', label: '외주계약', icon: BookOpenCheck, roles: STAFF },
-      { to: '/accounting', label: '회계', icon: Calculator, roles: ['amc', 'pm'] },
-      { to: '/inventory', label: '수발주·재고', icon: Package, roles: STAFF },
-      { to: '/ask', label: 'AI 비서', icon: Bot },
-    ],
-  },
-  {
-    group: '통제', items: [
-      { to: '/approvals', label: '승인함', icon: Stamp, roles: STAFF },
-      { to: '/audit', label: '감사 로그', icon: History, roles: ['amc', 'pm'] },
-    ],
-  },
-  {
-    group: '기타', items: [
-      { to: '/services', label: '부가 서비스', icon: Sparkles },
-      { to: '/settings', label: '설정', icon: SettingsIcon },
-    ],
-  },
-];
+import { COMMON, type NavItem, ROLE_WORKSPACES, visibleItems, type Workspace, workspaceFor, WORKSPACES } from './nav';
 
 export default function AppShell() {
   const [open, setOpen] = useState(false);
@@ -48,6 +13,27 @@ export default function AppShell() {
   const settings = useStore((s) => s.settings);
   const updateSettings = useStore((s) => s.updateSettings);
   const pending = useStore((s) => s.approvals.filter((a) => a.status === 'pending').length);
+  const navigate = useNavigate();
+  const ws = workspaceFor(settings.role, settings.workspace);
+  const allowed = ROLE_WORKSPACES[settings.role];
+  const items = visibleItems(ws, settings.role);
+  // 작업공간을 바꾸면 그 작업공간의 첫 전용 화면으로 이동(대시보드는 공통이라 건너뜀)
+  const switchWorkspace = (w: Workspace) => {
+    updateSettings({ workspace: w });
+    const first = visibleItems(w, settings.role).find((i) => i.to !== '/');
+    navigate(first?.to ?? '/');
+  };
+  const switchRole = (r: Role) => {
+    updateSettings({ role: r, workspace: ROLE_WORKSPACES[r][0] });
+    navigate('/');
+  };
+  const link = (i: NavItem) => (
+    <NavLink key={i.to} to={i.to} end={i.to === '/'} onClick={() => setOpen(false)} className={({ isActive }) => `flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm ${isActive ? 'bg-brand-500 font-semibold text-white' : 'hover:bg-white/10'}`}>
+      <i.icon size={16} />
+      <span className="flex-1">{i.label}</span>
+      {i.to === '/approvals' && pending > 0 && <span className="num rounded-full bg-amber-400 px-1.5 text-[11px] font-bold text-ink">{pending}</span>}
+    </NavLink>
+  );
 
   return (
     <div className="min-h-screen lg:flex">
@@ -59,23 +45,25 @@ export default function AppShell() {
             <p className="mt-1 text-[10px] tracking-wide text-slate-400">운영 인텔리전스</p>
           </div>
         </div>
+        {allowed.length > 1 && (
+          <div className="mx-3 mb-3 grid gap-1 rounded-xl bg-white/5 p-1" style={{ gridTemplateColumns: `repeat(${allowed.length}, minmax(0, 1fr))` }} role="tablist" aria-label="작업공간">
+            {WORKSPACES.filter((w) => allowed.includes(w.id)).map((w) => (
+              <button key={w.id} role="tab" aria-selected={w.id === ws} title={`${w.label} — ${w.desc}`} onClick={() => switchWorkspace(w.id)}
+                className={`rounded-lg px-1 py-1.5 text-xs font-semibold ${w.id === ws ? 'bg-white text-ink' : 'text-slate-300 hover:bg-white/10'}`}>
+                {w.label.split(' ')[0]}
+              </button>
+            ))}
+          </div>
+        )}
         <nav className="px-3 pb-6">
-          {NAV.map((g) => {
-            const items = g.items.filter((i) => !i.roles || i.roles.includes(settings.role));
-            if (!items.length) return null;
-            return (
-              <div key={g.group} className="mb-3">
-                {g.group && <p className="px-2 pb-1 pt-2 text-[11px] font-semibold text-slate-500">{g.group}</p>}
-                {items.map((i) => (
-                  <NavLink key={i.to} to={i.to} end={i.to === '/'} onClick={() => setOpen(false)} className={({ isActive }) => `flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm ${isActive ? 'bg-brand-500 font-semibold text-white' : 'hover:bg-white/10'}`}>
-                    <i.icon size={16} />
-                    <span className="flex-1">{i.label}</span>
-                    {i.to === '/approvals' && pending > 0 && <span className="num rounded-full bg-amber-400 px-1.5 text-[11px] font-bold text-ink">{pending}</span>}
-                  </NavLink>
-                ))}
-              </div>
-            );
-          })}
+          <div className="mb-3">
+            <p className="px-2 pb-1 pt-1 text-[11px] font-semibold text-slate-500">{WORKSPACES.find((w) => w.id === ws)!.label} · {WORKSPACES.find((w) => w.id === ws)!.desc}</p>
+            {items.map(link)}
+          </div>
+          <div className="mb-3">
+            <p className="px-2 pb-1 pt-2 text-[11px] font-semibold text-slate-500">기타</p>
+            {COMMON.map(link)}
+          </div>
         </nav>
       </aside>
       {open && <div className="fixed inset-0 z-30 bg-slate-900/40 lg:hidden" onClick={() => setOpen(false)} />}
@@ -89,7 +77,7 @@ export default function AppShell() {
           <span className="rounded-md bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">샘플 데이터</span>
           <div className="ml-auto flex items-center gap-2 text-sm">
             <span className="hidden text-slate-500 sm:inline">{settings.userName}</span>
-            <select aria-label="역할 전환" value={settings.role} onChange={(e) => updateSettings({ role: e.target.value as Role })} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm">
+            <select aria-label="역할 전환" value={settings.role} onChange={(e) => switchRole(e.target.value as Role)} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm">
               {(Object.keys(ROLE_LABEL) as Role[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
             </select>
           </div>

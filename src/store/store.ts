@@ -18,6 +18,7 @@ export const today = (): ISODate => {
 
 export interface Settings {
   role: Role;
+  workspace?: 'am' | 'pm' | 'fm'; // 작업공간(AM·PM·FM). 없으면 역할 기본값
   userName: string;
   provider: 'claude' | 'gemini' | 'none';
   claudeKey: string;

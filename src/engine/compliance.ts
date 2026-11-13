@@ -1,4 +1,4 @@
-import type { Building, ISODate, Inspection } from '../domain/types';
+import type { Building, Equipment, ISODate, Inspection } from '../domain/types';
 import { addMonthsToDate, daysBetween } from './money';
 
 /**
@@ -13,21 +13,22 @@ export interface ComplianceRule {
   law: string;
   cycleMonths: number;
   evidence: string;
+  equipment?: Equipment; // 관련 설비(설비 이력 화면에서 묶는 기준). 없으면 건물 공통
   applies: (b: Building) => boolean;
 }
 
 export const RULES: ComplianceRule[] = [
-  { id: 'fire-op', name: '소방시설 작동점검', law: '소방시설 설치 및 관리에 관한 법률', cycleMonths: 12, evidence: '자체점검 실시결과 보고서', applies: () => true },
-  { id: 'fire-full', name: '소방시설 종합점검', law: '소방시설 설치 및 관리에 관한 법률', cycleMonths: 12, evidence: '종합점검 결과 보고서', applies: (b) => b.equipment.includes('sprinkler') && b.gfa >= 5000 },
+  { id: 'fire-op', equipment: 'sprinkler', name: '소방시설 작동점검', law: '소방시설 설치 및 관리에 관한 법률', cycleMonths: 12, evidence: '자체점검 실시결과 보고서', applies: () => true },
+  { id: 'fire-full', equipment: 'sprinkler', name: '소방시설 종합점검', law: '소방시설 설치 및 관리에 관한 법률', cycleMonths: 12, evidence: '종합점검 결과 보고서', applies: (b) => b.equipment.includes('sprinkler') && b.gfa >= 5000 },
   { id: 'fire-monthly', name: '소방안전관리 업무 기록', law: '화재의 예방 및 안전관리에 관한 법률', cycleMonths: 1, evidence: '월간 업무수행 기록(2년 보관)', applies: () => true },
-  { id: 'elec', name: '전기설비 정기검사', law: '전기안전관리법', cycleMonths: 24, evidence: '정기검사 확인서', applies: (b) => b.equipment.includes('substation') },
-  { id: 'elev-reg', name: '승강기 정기검사', law: '승강기 안전관리법', cycleMonths: 12, evidence: '검사 합격증명서', applies: (b) => b.equipment.includes('elevator') },
-  { id: 'elev-self', name: '승강기 자체점검', law: '승강기 안전관리법', cycleMonths: 1, evidence: '자체점검 기록', applies: (b) => b.equipment.includes('elevator') },
+  { id: 'elec', equipment: 'substation', name: '전기설비 정기검사', law: '전기안전관리법', cycleMonths: 24, evidence: '정기검사 확인서', applies: (b) => b.equipment.includes('substation') },
+  { id: 'elev-reg', equipment: 'elevator', name: '승강기 정기검사', law: '승강기 안전관리법', cycleMonths: 12, evidence: '검사 합격증명서', applies: (b) => b.equipment.includes('elevator') },
+  { id: 'elev-self', equipment: 'elevator', name: '승강기 자체점검', law: '승강기 안전관리법', cycleMonths: 1, evidence: '자체점검 기록', applies: (b) => b.equipment.includes('elevator') },
   { id: 'bldg', name: '건축물 정기점검', law: '건축물관리법', cycleMonths: 36, evidence: '정기점검 결과 보고서', applies: (b) => b.gfa >= 3000 },
-  { id: 'gas', name: '가스사용시설 정기검사', law: '도시가스사업법', cycleMonths: 12, evidence: '검사 증명서', applies: (b) => b.equipment.includes('gas') },
-  { id: 'boiler', name: '보일러 계속사용검사', law: '에너지이용 합리화법', cycleMonths: 12, evidence: '검사 증명서', applies: (b) => b.equipment.includes('boiler') },
-  { id: 'tank', name: '저수조 청소', law: '수도법', cycleMonths: 6, evidence: '청소 완료 기록·수질검사 성적서', applies: (b) => b.equipment.includes('waterTank') },
-  { id: 'iaq', name: '실내공기질 측정', law: '실내공기질 관리법', cycleMonths: 12, evidence: '측정 결과 기록', applies: (b) => b.type !== 'logistics' && b.gfa >= 3000 },
+  { id: 'gas', equipment: 'gas', name: '가스사용시설 정기검사', law: '도시가스사업법', cycleMonths: 12, evidence: '검사 증명서', applies: (b) => b.equipment.includes('gas') },
+  { id: 'boiler', equipment: 'boiler', name: '보일러 계속사용검사', law: '에너지이용 합리화법', cycleMonths: 12, evidence: '검사 증명서', applies: (b) => b.equipment.includes('boiler') },
+  { id: 'tank', equipment: 'waterTank', name: '저수조 청소', law: '수도법', cycleMonths: 6, evidence: '청소 완료 기록·수질검사 성적서', applies: (b) => b.equipment.includes('waterTank') },
+  { id: 'iaq', equipment: 'hvac', name: '실내공기질 측정', law: '실내공기질 관리법', cycleMonths: 12, evidence: '측정 결과 기록', applies: (b) => b.type !== 'logistics' && b.gfa >= 3000 },
 ];
 
 export const applicableRules = (b: Building) => RULES.filter((r) => r.applies(b));
