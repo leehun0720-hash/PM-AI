@@ -6,7 +6,7 @@ import type { Table } from './importTable';
 import { addMonths } from './money';
 
 export type RecvField = 'unit' | 'tenant' | 'month' | 'billed' | 'paid' | 'dueDate' | 'paidDate';
-export const RECV_REQUIRED: RecvField[] = ['unit', 'billed', 'paid'];
+export const RECV_REQUIRED: RecvField[] = ['unit', 'billed']; // 수납액 열이 없으면 기존 수납액을 유지한다
 export type RecvColumnMap = Record<RecvField, number | null>;
 
 export const RECV_LABEL: Record<RecvField, string> = {
@@ -52,7 +52,8 @@ export function matchUnit(raw: string, units: Unit[], saved: Record<string, stri
   return units.find((u) => unitKey(u.name) === k)?.id ?? null;
 }
 
-export interface RecvDraft { row: number; unit: string; tenant: string; month: Month; billed: number; paid: number; dueDate: ISODate; paidDate?: ISODate }
+/** paid가 null이면 파일에 수납액이 없음(열이 없거나 빈 칸) → 기존 값을 유지한다 */
+export interface RecvDraft { row: number; unit: string; tenant: string; month: Month; billed: number; paid: number | null; dueDate: ISODate; paidDate?: ISODate }
 export interface RecvParsed { drafts: RecvDraft[]; errors: RowError[]; skippedSummary: number }
 
 const SUMMARY = /^(합계|소계|총계|누계|total)/;
@@ -72,8 +73,8 @@ export function buildRecvDrafts(table: Table, map: RecvColumnMap, opts: { fallba
     const billed = parseAmount(billedRaw);
     if (billed === null) { fail(`고지액을 읽지 못했습니다: "${billedRaw}"`); return; }
     const paidRaw = cell('paid');
-    const paid = paidRaw ? parseAmount(paidRaw) : 0; // 빈 수납액 = 아직 안 냄
-    if (paid === null) { fail(`수납액을 읽지 못했습니다: "${paidRaw}"`); return; }
+    const paid = paidRaw ? parseAmount(paidRaw) : null; // 빈 칸은 '모름' — 0(미납)으로 덮어쓰지 않는다
+    if (paidRaw && paid === null) { fail(`수납액을 읽지 못했습니다: "${paidRaw}"`); return; }
     const monthRaw = cell('month');
     const month = monthRaw ? parseMonth(monthRaw) : opts.fallbackMonth;
     if (!month) { fail(`부과월을 읽지 못했습니다: "${monthRaw}"`); return; }
@@ -91,6 +92,8 @@ export function buildRecvDrafts(table: Table, map: RecvColumnMap, opts: { fallba
   return out;
 }
 
+export interface Diff { unitId: string; unit: string; month: Month; file: number; pmai: number }
+
 export interface RecvPreview {
   upserts: Receivable[];
   created: number;
@@ -100,7 +103,12 @@ export interface RecvPreview {
   errors: RowError[];
   skippedSummary: number;
   overpaid: number;
-  billedMismatch: { unitId: string; unit: string; month: Month; file: number; pmai: number }[];
+  billedMismatch: Diff[];
+  /** 파일 값이 기존 수납액보다 작은 기록(완납 → 미납 등) */
+  paidDecreased: Diff[];
+  /** 파일 전체(호실을 못 맞춘 줄, 이미 같은 줄 포함) 합계 — 파일의 합계 줄과 맞춰 볼 때 쓴다 */
+  fileBilled: number;
+  filePaid: number;
   months: Month[];
   totalBilled: number;
   totalPaid: number;
@@ -111,11 +119,14 @@ const same = (a: Receivable, b: Receivable) =>
 
 /** settlementBilled: 'unitId|month' → PMAI 정산의 임차인 부담 합계(부가세 포함). 고지액 대조에 쓰고, 정산이 없으면 이미 있던 수납 기록의 고지액과 견준다. */
 export function buildRecvPreview(parsed: RecvParsed, opts: { buildingId: string; units: Unit[]; savedUnits: Record<string, string>; existing: Receivable[]; settlementBilled: Map<string, number> }): RecvPreview {
-  const pv: RecvPreview = { upserts: [], created: 0, updated: 0, unchanged: 0, unmapped: [], errors: parsed.errors, skippedSummary: parsed.skippedSummary, overpaid: 0, billedMismatch: [], months: [], totalBilled: 0, totalPaid: 0 };
+  const pv: RecvPreview = { upserts: [], created: 0, updated: 0, unchanged: 0, unmapped: [], errors: parsed.errors, skippedSummary: parsed.skippedSummary, overpaid: 0, billedMismatch: [], paidDecreased: [], fileBilled: 0, filePaid: 0, months: [], totalBilled: 0, totalPaid: 0 };
+  const seenIds = new Map<string, number>();
   const units = opts.units.filter((u) => u.buildingId === opts.buildingId);
   const unmapped = new Map<string, { unit: string; count: number; billed: number }>();
   const byId = new Map(opts.existing.map((r) => [r.id, r]));
   for (const d of parsed.drafts) {
+    pv.fileBilled += d.billed;
+    pv.filePaid += d.paid ?? 0;
     const unitId = matchUnit(d.unit, units, opts.savedUnits);
     if (!unitId) {
       const u = unmapped.get(d.unit) ?? { unit: d.unit, count: 0, billed: 0 };
@@ -124,15 +135,24 @@ export function buildRecvPreview(parsed: RecvParsed, opts: { buildingId: string;
       continue;
     }
     const id = `RC-${unitId}-${d.month}`;
+    const unitName = units.find((u) => u.id === unitId)?.name ?? d.unit;
+    if (seenIds.has(id)) {
+      pv.errors = [...pv.errors, { row: d.row, reason: `${seenIds.get(id)}번째 줄과 같은 호실·월(${unitName} ${d.month})이 또 나옵니다`, raw: [] }];
+      continue;
+    }
+    seenIds.set(id, d.row);
     const old = byId.get(id);
+    const paid = d.paid ?? old?.paid ?? 0;
+    const paidDate = d.paidDate ?? (paid > 0 ? old?.paidDate : undefined);
     const rec: Receivable = {
       id, buildingId: opts.buildingId, month: d.month, unitId, tenant: d.tenant || old?.tenant || '',
-      billed: d.billed, paid: d.paid, dueDate: d.dueDate, ...(d.paidDate ? { paidDate: d.paidDate } : {}),
+      billed: d.billed, paid, dueDate: d.dueDate, ...(paidDate ? { paidDate } : {}),
     };
-    if (d.paid > d.billed) pv.overpaid++;
     const pmai = opts.settlementBilled.get(`${unitId}|${d.month}`) ?? old?.billed; // 정산 값, 없으면 이미 있던 고지액
     if (pmai !== undefined && pmai !== d.billed) pv.billedMismatch.push({ unitId, unit: d.unit, month: d.month, file: d.billed, pmai });
+    if (old && paid < old.paid) pv.paidDecreased.push({ unitId, unit: d.unit, month: d.month, file: paid, pmai: old.paid });
     if (old && same(old, rec)) { pv.unchanged++; continue; }
+    if (paid > d.billed) pv.overpaid++;
     if (old) pv.updated++; else pv.created++;
     pv.upserts.push(rec);
     pv.totalBilled += rec.billed;

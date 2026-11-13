@@ -37,3 +37,23 @@ test('가져온 뒤 다시 바뀐 수납 기록이 있으면 되돌리지 않는
 test('반영할 수납 기록이 없으면 막는다', () => {
   expect(s().applyRecvImport(args([]))).toEqual({ ok: false, reason: '반영할 줄이 없습니다.' });
 });
+
+test('되돌린 수납 가져오기는 반영 전·후 사본을 지운다', () => {
+  const old = existingOne();
+  s().applyRecvImport(args([{ ...old, paid: 1 }]));
+  s().undoImport('R1');
+  expect(s().importBatches[0].before).toBeUndefined();
+  expect(s().importBatches[0].after).toBeUndefined();
+});
+test('정산을 승인해도 이미 들어온 수납액·입금일은 지우지 않는다', () => {
+  const id = s().runSettlement('A', s().seedMonth);
+  const rcId = `RC-${s().settlements.find((x) => x.id === id)!.lines.find((l) => l.payer === 'tenant')!.unitId}-${s().seedMonth}`;
+  s().applyRecvImport(args([{ id: rcId, buildingId: 'A', month: s().seedMonth, unitId: rcId.slice(3, 7), tenant: '갑', billed: 100, paid: 100, dueDate: '2031-02-25', paidDate: '2026-11-20' }]));
+  s().updateSettings({ role: 'pm' });
+  for (const a of s().settlements.find((x) => x.id === id)!.anomalies) s().resolveAnomaly(id, a.id, '확인');
+  const err = s().submitSettlement(id);
+  expect(err).toBeNull();
+  const ap = s().approvals.find((a) => a.targetId === id)!;
+  expect(s().decideApproval(ap.id, true, '')).toBeNull();
+  expect(s().receivables.find((r) => r.id === rcId)).toMatchObject({ paid: 100, paidDate: '2026-11-20' });
+});

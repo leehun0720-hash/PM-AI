@@ -11,7 +11,7 @@ import { useStore } from '../../store/store';
 import { type Grid, readGrid } from './ImportDialog';
 
 const FIELDS = Object.keys(RECV_LABEL) as RecvField[];
-const REQUIRED = new Set<RecvField>(['unit', 'billed', 'paid']);
+const REQUIRED = new Set<RecvField>(['unit', 'billed']);
 const signature = (headers: string[]) => `recv:${headers.map(normHeader).join('|')}`;
 const SKIP = '__skip__';
 
@@ -110,12 +110,15 @@ export default function RecvImportDialog({ open, onClose, buildingId, month }: {
                       </Field>
                     ))}
                   </div>
-                  <p className="mt-2 text-xs text-slate-500">부과월 열이 없으면 {month}, 납기일 열이 없으면 다음 달 25일로 봅니다. 수납액이 빈 칸이면 0원(미납)입니다.</p>
+                  <p className="mt-2 text-xs text-slate-500">납기일 열이 없으면 다음 달 25일로 봅니다. 수납액 열이 없거나 칸이 비어 있으면 이미 있는 수납액을 그대로 둡니다(새 기록은 0원).</p>
                   <div className="mt-3 overflow-x-auto">
                     <table className="min-w-full text-xs"><thead><tr>{table.headers.map((h, i) => <th key={i} className={th}>{h}</th>)}</tr></thead>
                       <tbody>{table.rows.slice(0, 5).map((r, i) => <tr key={i}>{table.headers.map((_, k) => <td key={k} className={td}>{r[k]}</td>)}</tr>)}</tbody></table>
                   </div>
                 </details>
+                {colMap.month === null && missing.length === 0 && (
+                  <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-amber-900">부과월 열이 없어 모든 줄을 <b>{month}</b> 고지분으로 넣습니다. 다른 월이면 화면 위의 월을 바꾸거나 부과월 열을 골라 주세요.</p>
+                )}
                 {missing.map((f) => <p key={f} role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-red-700">{RECV_LABEL[f]} 열을 찾지 못했습니다. 위에서 열을 골라 주세요.</p>)}
 
                 {askUnits.length > 0 && (
@@ -142,7 +145,8 @@ export default function RecvImportDialog({ open, onClose, buildingId, month }: {
                     <p className="mb-2 font-semibold text-ink">3. 미리보기</p>
                     <table className="w-full"><tbody>
                       <tr><td className={td}>반영할 기록</td><td className={tdNum}><b>{preview.upserts.length}건</b> (새로 {preview.created} · 고침 {preview.updated})</td></tr>
-                      <tr><td className={td}>고지액 / 수납액 합계</td><td className={tdNum}>{won(preview.totalBilled)} / {won(preview.totalPaid)}</td></tr>
+                      <tr><td className={td}>반영분 고지액 / 수납액</td><td className={tdNum}>{won(preview.totalBilled)} / {won(preview.totalPaid)}</td></tr>
+                      <tr><td className={td}>파일 전체 고지액 / 수납액</td><td className={tdNum}>{won(preview.fileBilled)} / {won(preview.filePaid)}</td></tr>
                       <tr><td className={td}>대상 월</td><td className={tdNum}>{preview.months.join(', ') || '—'}</td></tr>
                       <tr><td className={td}>이미 같아서 건너뜀</td><td className={tdNum}>{preview.unchanged}건</td></tr>
                       <tr><td className={td}>합계 줄</td><td className={tdNum}>{preview.skippedSummary}건</td></tr>
@@ -155,6 +159,15 @@ export default function RecvImportDialog({ open, onClose, buildingId, month }: {
                         {preview.errors.slice(0, 20).map((e) => <li key={`${e.row}-${e.reason}`}>{e.row}번째 줄: {e.reason}</li>)}
                         {preview.errors.length > 20 && <li>외 {preview.errors.length - 20}건</li>}
                       </ul>
+                    )}
+                    {preview.paidDecreased.length > 0 && (
+                      <div className="mt-3 rounded-lg bg-red-50 p-2 text-xs text-red-800">
+                        <p className="font-semibold">수납액이 줄어드는 기록 {preview.paidDecreased.length}건</p>
+                        <ul className="mt-1 space-y-0.5">
+                          {preview.paidDecreased.slice(0, 10).map((m) => <li key={`${m.unitId}-${m.month}`}>{unitName(m.unitId)} {m.month}: 지금 {won(m.pmai)} → 파일 {won(m.file)}</li>)}
+                        </ul>
+                        <p className="mt-1">이미 받은 돈이 파일에서 줄어 있습니다. 환불·취소가 아니라면 파일을 확인하세요.</p>
+                      </div>
                     )}
                     {preview.billedMismatch.length > 0 && (
                       <div className="mt-3 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">

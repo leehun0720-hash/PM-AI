@@ -189,7 +189,12 @@ export const useStore = create<State>()(
           if (approve) {
             const byUnit = new Map<string, { tenant: string; billed: number }>();
             for (const l of st.lines) if (l.payer === 'tenant') { const x = byUnit.get(l.unitId) ?? { tenant: l.payerName, billed: 0 }; x.billed += l.amount + l.vat; byUnit.set(l.unitId, x); }
-            const fresh = [...byUnit].map(([unitId, x]) => ({ id: `RC-${unitId}-${st.month}`, buildingId: st.buildingId, month: st.month, unitId, tenant: x.tenant, billed: x.billed, paid: 0, dueDate: `${addMonths(st.month, 1)}-25` }));
+            // 이미 들어온 수납액·입금일(파일 가져오기·수납 처리)은 지우지 않는다
+            const fresh = [...byUnit].map(([unitId, x]) => {
+              const id = `RC-${unitId}-${st.month}`;
+              const prev = s.receivables.find((r) => r.id === id);
+              return { id, buildingId: st.buildingId, month: st.month, unitId, tenant: x.tenant, billed: x.billed, paid: prev?.paid ?? 0, dueDate: prev?.dueDate ?? `${addMonths(st.month, 1)}-25`, ...(prev?.paidDate ? { paidDate: prev.paidDate } : {}) };
+            });
             patch.receivables = [...s.receivables.filter((r) => !fresh.some((f) => f.id === r.id)), ...fresh];
           }
         } else if (ap.kind === 'payment') patch.invoices = s.invoices.map((i) => (i.id === ap.targetId ? { ...i, status: approve ? 'approved' : 'rejected' } : i));
@@ -309,7 +314,7 @@ export const useStore = create<State>()(
           const restore = new Map(after.map((a, i) => [a.id, b.before?.[i] ?? null]));
           set({
             receivables: s.receivables.flatMap((r) => (restore.has(r.id) ? (restore.get(r.id) ? [restore.get(r.id)!] : []) : [r])),
-            importBatches: s.importBatches.map((x) => (x.id === batchId ? { ...x, undoneAt: new Date().toISOString() } : x)),
+            importBatches: s.importBatches.map((x) => (x.id === batchId ? { ...x, undoneAt: new Date().toISOString(), before: undefined, after: undefined } : x)),
           });
           get().log('가져오기 되돌리기', batchId, `${b.fileName} — 수납 ${after.length}건 복원`);
           return { ok: true, removed: after.length };

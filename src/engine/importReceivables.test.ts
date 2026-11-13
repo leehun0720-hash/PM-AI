@@ -83,3 +83,34 @@ test('정산이 없어도 이미 있는 수납 기록과 고지액이 다르면 
   expect(pv.billedMismatch).toEqual([{ unitId: 'A-01', unit: '101호', month: '2026-09', file: 1000000, pmai: 1240000 }]);
   expect(pv.updated).toBe(1);
 });
+
+const paidOne: Receivable = { id: 'RC-A-01-2026-07', buildingId: 'A', month: '2026-07', unitId: 'A-01', tenant: '카페 온도', billed: 100, paid: 100, dueDate: '2026-08-25', paidDate: '2026-08-25' };
+test('수납액 칸이 비었거나 열이 없으면 기존 수납액·입금일을 지우지 않는다', () => {
+  const t1 = toTable(parseCsv('호실,부과월,고지액,수납액\n101호,2026-07,100,'), isKnownRecvHeader);
+  const pv1 = buildRecvPreview(buildRecvDrafts(t1, autoMapRecv(t1.headers), opt), { ...base, existing: [paidOne] });
+  expect(pv1.upserts).toHaveLength(0);
+  expect(pv1.unchanged).toBe(1);
+  const t2 = toTable(parseCsv('호실,부과월,고지액\n101호,2026-07,100'), isKnownRecvHeader);
+  expect(missingRecvRequired(autoMapRecv(t2.headers))).toEqual([]);
+  const pv2 = buildRecvPreview(buildRecvDrafts(t2, autoMapRecv(t2.headers), opt), { ...base, existing: [paidOne] });
+  expect(pv2.unchanged).toBe(1);
+});
+test('파일이 수납액을 줄이면 따로 알린다', () => {
+  const t = toTable(parseCsv('호실,부과월,고지액,수납액\n101호,2026-07,100,0'), isKnownRecvHeader);
+  const pv = buildRecvPreview(buildRecvDrafts(t, autoMapRecv(t.headers), opt), { ...base, existing: [paidOne] });
+  expect(pv.paidDecreased).toEqual([{ unitId: 'A-01', unit: '101호', month: '2026-07', file: 0, pmai: 100 }]);
+  expect(pv.upserts[0]).toMatchObject({ paid: 0 });
+  expect(pv.upserts[0].paidDate).toBeUndefined();
+});
+test('다른 이름 둘이 같은 호실로 맞춰지면 뒤의 줄을 못 읽은 줄로 둔다', () => {
+  const t = toTable(parseCsv('호실,고지액,수납액\n101호,100,100\n상가1,200,200'), isKnownRecvHeader);
+  const pv = buildRecvPreview(buildRecvDrafts(t, autoMapRecv(t.headers), opt), { ...base, savedUnits: { 상가1: 'A-01' } });
+  expect(pv.upserts).toHaveLength(1);
+  expect(pv.errors.at(-1)!.reason).toBe('2번째 줄과 같은 호실·월(101호 2026-10)이 또 나옵니다');
+});
+test('파일 전체 합계와 반영분 합계를 따로 준다', () => {
+  const t = load();
+  const pv = buildRecvPreview(buildRecvDrafts(t, autoMapRecv(t.headers), opt), base);
+  expect(pv.fileBilled).toBe(1250000 + 4800000 + 14300000 + 900000 + 1240000);
+  expect(pv.filePaid).toBe(1250000 + 0 + 14300000 + 900000 + 1240000);
+});

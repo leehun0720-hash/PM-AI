@@ -106,7 +106,7 @@ export default function Accounting() {
               })}
             </Table>
           )}
-          <div className="mt-3"><Note>고지액은 승인된 정산에서 자동 생성됩니다. 수납 확인은 은행 거래내역 연동 전 단계로, 담당자가 입금을 확인한 뒤 수동 처리합니다.</Note></div>
+          <div className="mt-3"><Note>고지액은 승인된 정산에서 자동으로 생기거나, 쓰던 고지·수납 현황 파일을 가져와 채웁니다. 입금은 담당자가 확인해 수납 처리하거나 수납 파일로 한꺼번에 반영합니다.</Note></div>
         </Card>
       )}
 
